@@ -9,9 +9,11 @@
     }
   ],
   "compilerOptions": {
-    "baseUrl": ".",
+    "baseUrl": "src",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["*"],
+      "@lib/*": ["lib/*"]
+      
     }
   }
 }
