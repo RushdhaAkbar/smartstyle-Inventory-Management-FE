@@ -1,3 +1,4 @@
+// File: src/components/InventoryForm.tsx
 import type React from "react"
 import { useState, useRef } from "react"
 import { Button } from "../components/ui/button"
@@ -5,48 +6,66 @@ import { Input } from "../components/ui/input"
 import { Label } from "../components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select"
 import { Plus, Upload, QrCode, Barcode } from "lucide-react"
+import { useGetCategoriesQuery, useCreateCategoryMutation } from '../lib/api'
 
 interface Product {
   id: string
   name: string
-  size: string
-  color: string
+  sizes: string[]
+  colors: string[]
   price: number
   availability: boolean
-  type: string
+  categoryId: { _id: string; name: string }
   qrCode: string
   barcode: string
   image: string
+  description: string
+  stock: number
 }
 
 interface InventoryFormProps {
-  onAdd: (newProduct: Product) => void
+  onAdd: (newProduct: Omit<Product, 'id' | 'categoryId'> & { categoryId: string }) => Promise<void>
 }
 
 const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
-  const [newProduct, setNewProduct] = useState<Product>({
-    id: "",
+  const { data: categories, refetch: refetchCategories } = useGetCategoriesQuery()
+  const [createCategory] = useCreateCategoryMutation()
+  const [selectedCategory, setSelectedCategory] = useState<string>('')
+  const [newCategoryName, setNewCategoryName] = useState<string>('')
+  const [showNewCategory, setShowNewCategory] = useState(false)
+  const [newProduct, setNewProduct] = useState<Omit<Product, 'id' | 'categoryId'>>({
     name: "",
-    size: "",
-    color: "",
+    sizes: [],
+    colors: [],
     price: 0,
     availability: true,
-    type: "",
     qrCode: "",
     barcode: "",
     image: "",
+    description: "",
+    stock: 0,
   })
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
-    setNewProduct((prev) => ({
-      ...prev,
-      [name]: name === "price" ? Number.parseFloat(value) || 0 : value,
-    }))
+    setNewProduct((prev) => {
+      const updated = { ...prev };
+      if (name === "color") {
+        updated.colors = value ? [value] : [];
+      } else if (name === "price") {
+        updated.price = parseFloat(value) || 0;
+      } else if (name === "stock") {
+        updated.stock = parseInt(value) || 0;
+      } else {
+        // @ts-ignore
+        updated[name] = value;
+      }
+      return updated;
+    })
   }
 
-  const handleSelectChange = (name: string, value: string) => {
-    setNewProduct((prev) => ({ ...prev, [name]: value }))
+  const handleSelectChange = (name: keyof Omit<Product, 'id' | 'categoryId'>, value: string) => {
+    setNewProduct((prev) => ({ ...prev, [name]: name === "sizes" ? [value] : name === "colors" ? [value] : value }))
   }
 
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -72,9 +91,31 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
     }
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleAddCategory = async () => {
+    if (!newCategoryName) return
+    try {
+      const result = await createCategory({ name: newCategoryName })
+      if (result.error) {
+        console.error('Failed to create category:', result.error)
+        return
+      }
+      const newCat = result.data
+      if (!newCat || !newCat._id) {
+        console.error('New category data is invalid or null')
+        return
+      }
+      await refetchCategories()
+      setSelectedCategory(newCat._id)
+      setNewCategoryName('')
+      setShowNewCategory(false)
+    } catch (error) {
+      console.error('Exception while creating category:', error)
+    }
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!newProduct.name || !newProduct.type || newProduct.price <= 0) {
+    if (!newProduct.name || newProduct.price <= 0 || !selectedCategory) {
       return
     }
 
@@ -82,25 +123,29 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
 
     const productToAdd = {
       ...newProduct,
-      id: Date.now().toString(),
+      categoryId: selectedCategory,
       qrCode: newProduct.qrCode || qrCode,
       barcode: newProduct.barcode || barcode,
       image: newProduct.image || `/placeholder.svg?height=100&width=100&query=${encodeURIComponent(newProduct.name)}`,
+      sizes: newProduct.sizes,
+      colors: newProduct.colors,
     }
 
-    onAdd(productToAdd)
+    await onAdd(productToAdd)
     setNewProduct({
-      id: "",
       name: "",
-      size: "",
-      color: "",
+      sizes: [],
+      colors: [],
       price: 0,
       availability: true,
-      type: "",
       qrCode: "",
       barcode: "",
       image: "",
+      description: "",
+      stock: 0,
     })
+    setSelectedCategory('')
+    setNewCategoryName('')
   }
 
   return (
@@ -119,23 +164,43 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="type">Product Type *</Label>
-          <Select value={newProduct.type} onValueChange={(value) => handleSelectChange("type", value)}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select product type" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="Casual">Casual</SelectItem>
-              <SelectItem value="Formal">Formal</SelectItem>
-              <SelectItem value="Sports">Sports</SelectItem>
-              <SelectItem value="Accessories">Accessories</SelectItem>
-            </SelectContent>
-          </Select>
+          <Label htmlFor="category">Category *</Label>
+          <div className="flex gap-2">
+            <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+              <SelectTrigger className="flex-1">
+                <SelectValue placeholder="Select category" />
+              </SelectTrigger>
+              <SelectContent>
+                {categories?.map(cat => (
+                  <SelectItem key={cat._id} value={cat._id}>{cat.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button type="button" variant="outline" onClick={() => setShowNewCategory(true)}>
+              Add New
+            </Button>
+          </div>
         </div>
+
+        {showNewCategory && (
+          <div className="space-y-2">
+            <Label htmlFor="newCategoryName">New Category Name *</Label>
+            <div className="flex gap-2">
+              <Input
+                id="newCategoryName"
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                required
+              />
+              <Button type="button" onClick={handleAddCategory}>Add</Button>
+              <Button type="button" variant="outline" onClick={() => setShowNewCategory(false)}>Cancel</Button>
+            </div>
+          </div>
+        )}
 
         <div className="space-y-2">
           <Label htmlFor="size">Size</Label>
-          <Select value={newProduct.size} onValueChange={(value) => handleSelectChange("size", value)}>
+          <Select value={newProduct.sizes[0] || ''} onValueChange={(value) => handleSelectChange("sizes", value)}>
             <SelectTrigger>
               <SelectValue placeholder="Select size" />
             </SelectTrigger>
@@ -152,7 +217,21 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
 
         <div className="space-y-2">
           <Label htmlFor="color">Color</Label>
-          <Input id="color" name="color" placeholder="Enter color" value={newProduct.color} onChange={handleChange} />
+          <Input id="color" name="color" placeholder="Enter color" value={newProduct.colors[0] || ''} onChange={handleChange} />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="stock">Stock *</Label>
+          <Input
+            id="stock"
+            name="stock"
+            type="number"
+            min="0"
+            placeholder="0"
+            value={newProduct.stock || ""}
+            onChange={handleChange}
+            required
+          />
         </div>
 
         <div className="space-y-2">
@@ -168,6 +247,11 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
             onChange={handleChange}
             required
           />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="description">Description</Label>
+          <Input id="description" name="description" placeholder="Enter description" value={newProduct.description} onChange={handleChange} />
         </div>
 
         <div className="space-y-2">

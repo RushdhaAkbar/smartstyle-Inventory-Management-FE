@@ -1,3 +1,4 @@
+
 import type React from "react"
 import { Button } from "../components/ui/button"
 import { Badge } from "../components/ui/badge"
@@ -8,14 +9,16 @@ import { Trash2, Package, QrCode, Barcode } from "lucide-react"
 interface Product {
   id: string
   name: string
-  size: string
-  color: string
+  sizes: string[]
+  colors: string[]
   price: number
   availability: boolean
-  type: string
+  categoryId: { _id: string; name: string }
   qrCode: string
   barcode: string
   image: string
+  description: string
+  stock: number
 }
 
 interface ProductListProps {
@@ -42,9 +45,10 @@ const ProductList: React.FC<ProductListProps> = ({ products, onDelete, onSetAvai
           <TableRow>
             <TableHead className="w-16">Image</TableHead>
             <TableHead>Product</TableHead>
-            <TableHead>Type</TableHead>
-            <TableHead>Size</TableHead>
-            <TableHead>Color</TableHead>
+            <TableHead>Category</TableHead>
+            <TableHead>Sizes</TableHead>
+            <TableHead>Colors</TableHead>
+            <TableHead>Stock</TableHead>
             <TableHead>Price</TableHead>
             <TableHead>Codes</TableHead>
             <TableHead>Status</TableHead>
@@ -67,10 +71,11 @@ const ProductList: React.FC<ProductListProps> = ({ products, onDelete, onSetAvai
                 </div>
               </TableCell>
               <TableCell>
-                <Badge variant="outline">{product.type}</Badge>
+                <Badge variant="outline">{product.categoryId?.name}</Badge>
               </TableCell>
-              <TableCell>{product.size || "N/A"}</TableCell>
-              <TableCell>{product.color || "N/A"}</TableCell>
+              <TableCell>{product.sizes.join(', ') || "N/A"}</TableCell>
+              <TableCell>{product.colors.join(', ') || "N/A"}</TableCell>
+              <TableCell>{product.stock}</TableCell>
               <TableCell className="font-medium">${product.price}</TableCell>
               <TableCell>
                 <div className="space-y-1 text-xs">

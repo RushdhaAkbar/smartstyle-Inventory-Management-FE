@@ -1,67 +1,74 @@
 import type React from "react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import InventoryForm from "../components/InventoryForm"
 import ProductList from "../components/ProductList"
 import SystemStatus from "../components/SystemStatus"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { Package, Plus, BarChart3 } from "lucide-react"
+import { useGetProductsQuery, useCreateProductMutation, useDeleteProductMutation, useUpdateProductMutation } from '../lib/api'
 
 interface Product {
   id: string
   name: string
-  size: string
-  color: string
+  sizes: string[]
+  colors: string[]
   price: number
   availability: boolean
-  type: string
+  categoryId: { _id: string; name: string }
   qrCode: string
   barcode: string
   image: string
+  description: string
+  stock: number
 }
 
 const Inventory: React.FC = () => {
-  const [products, setProducts] = useState<Product[]>([
-    {
-      id: "1",
-      name: "Blue Shirt",
-      size: "M",
-      color: "Blue",
-      price: 20,
-      availability: true,
-      type: "Casual",
-      qrCode: "QR1",
-      barcode: "BAR1",
-      image: "/blue-shirt.png",
-    },
-    {
-      id: "2",
-      name: "Red Dress",
-      size: "S",
-      color: "Red",
-      price: 50,
-      availability: false,
-      type: "Formal",
-      qrCode: "QR2",
-      barcode: "BAR2",
-      image: "/woman-in-red-dress.png",
-    },
-  ])
+  const { data: productsData, isLoading } = useGetProductsQuery()
+  const [createProduct] = useCreateProductMutation()
+  const [deleteProduct] = useDeleteProductMutation()
+  const [updateProduct] = useUpdateProductMutation()
   const [status, setStatus] = useState({ lastUpdated: new Date().toString() })
 
-  const addProduct = (newProduct: Product) => {
-    setProducts([...products, newProduct])
+  const products: Product[] = productsData?.map(p => ({
+    ...p,
+    id: p._id || p.id,
+    price: typeof p.price === 'string' ? parseFloat(p.price) : p.price,
+    sizes: p.sizes || [],
+    colors: p.colors || [],
+    categoryId: p.categoryId, // populated object
+  })) || []
+
+  useEffect(() => {
     setStatus({ lastUpdated: new Date().toString() })
+  }, [productsData])
+
+  const addProduct = async (newProduct: Omit<Product, 'id' | 'categoryId'> & { categoryId: string }) => {
+    try {
+      await createProduct(newProduct).unwrap()
+    } catch (error) {
+      console.error('Failed to add product:', error)
+    }
   }
 
-  const deleteProduct = (id: string) => {
-    setProducts(products.filter((p) => p.id !== id))
-    setStatus({ lastUpdated: new Date().toString() })
+  const removeProduct = async (id: string) => {
+    try {
+      await deleteProduct(id).unwrap()
+    } catch (error) {
+      console.error('Failed to delete product:', error)
+    }
   }
 
-  const setAvailability = (id: string, availability: boolean) => {
-    setProducts(products.map((p) => (p.id === id ? { ...p, availability } : p)))
-    setStatus({ lastUpdated: new Date().toString() })
+  const setAvailability = async (id: string, availability: boolean) => {
+    try {
+      await updateProduct({ id, updates: { availability } }).unwrap()
+    } catch (error) {
+      console.error('Failed to update availability:', error)
+    }
+  }
+
+  if (isLoading) {
+    return <div>Loading...</div>
   }
 
   const totalProducts = products.length
@@ -114,7 +121,7 @@ const Inventory: React.FC = () => {
               <span className="text-sm">$</span>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">${totalValue}</div>
+              <div className="text-2xl font-bold">${totalValue.toFixed(2)}</div>
               <p className="text-xs text-muted-foreground">Inventory value</p>
             </CardContent>
           </Card>
@@ -140,7 +147,7 @@ const Inventory: React.FC = () => {
                 <CardDescription>View and manage your product inventory</CardDescription>
               </CardHeader>
               <CardContent>
-                <ProductList products={products} onDelete={deleteProduct} onSetAvailability={setAvailability} />
+                <ProductList products={products} onDelete={removeProduct} onSetAvailability={setAvailability} />
               </CardContent>
             </Card>
           </TabsContent>
