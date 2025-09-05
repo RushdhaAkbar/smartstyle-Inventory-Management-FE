@@ -6,79 +6,85 @@ import SystemStatus from "../components/SystemStatus"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { Package, Plus, BarChart3 } from "lucide-react"
-import { useGetProductsQuery, useCreateProductMutation, useDeleteProductMutation, useUpdateProductMutation } from '../lib/api'
+import { useGetProductsQuery, useGetCategoriesQuery, useCreateProductMutation } from '../lib/api'
+import { Input } from "../components/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select"
+import type { Product } from '../types/product'
 
-interface Product {
-  id: string
-  name: string
-  sizes: string[]
-  colors: string[]
-  price: number
-  availability: boolean
-  categoryId: { _id: string; name: string }
-  qrCode: string
-  barcode: string
+interface Variant {
+  color: string
   image: string
-  description: string
-  stock: number
 }
 
 const Inventory: React.FC = () => {
-  const { data: productsData, isLoading } = useGetProductsQuery()
+  const { data: productsData } = useGetProductsQuery()
+  const { data: categories } = useGetCategoriesQuery()
   const [createProduct] = useCreateProductMutation()
-  const [deleteProduct] = useDeleteProductMutation()
-  const [updateProduct] = useUpdateProductMutation()
+  const [products, setProducts] = useState<Product[]>([])
+  const [filteredProducts, setFilteredProducts] = useState<Product[]>([])
   const [status, setStatus] = useState({ lastUpdated: new Date().toString() })
-
-  const products: Product[] = productsData?.map(p => ({
-    ...p,
-    id: p._id || p.id,
-    price: typeof p.price === 'string' ? parseFloat(p.price) : p.price,
-    sizes: p.sizes || [],
-    colors: p.colors || [],
-    categoryId: p.categoryId, // populated object
-  })) || []
+  const [searchTerm, setSearchTerm] = useState('')
+  const [sortBy, setSortBy] = useState('name')
+  const [filterCategory, setFilterCategory] = useState('all') // Default to 'all'
 
   useEffect(() => {
-    setStatus({ lastUpdated: new Date().toString() })
-  }, [productsData])
-
-  const addProduct = async (newProduct: Omit<Product, 'id' | 'categoryId'> & { categoryId: string }) => {
-    try {
-      await createProduct(newProduct).unwrap()
-    } catch (error) {
-      console.error('Failed to add product:', error)
+    if (productsData) {
+      const mappedProducts = productsData.map(p => ({
+        ...p,
+        categoryId: { _id: p.categoryId, name: categories?.find(c => c._id === p.categoryId)?.name || 'Unknown' },
+        subcategory: p.subcategory || '',
+      }));
+      setProducts(mappedProducts)
+      setFilteredProducts(mappedProducts)
     }
-  }
+    setStatus({ lastUpdated: new Date().toString() });
+  }, [productsData, categories]);
 
-  const removeProduct = async (id: string) => {
+  useEffect(() => {
+    let filtered = products
+      .filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()))
+      .filter(p => filterCategory === 'all' || p.categoryId._id === filterCategory); // Handle 'all'
+
+    filtered = filtered.sort((a, b) => {
+      if (sortBy === 'price') return Number(a.price) - Number(b.price);
+      if (sortBy === 'stock') return a.stock - b.stock;
+      return a.name.localeCompare(b.name);
+    });
+
+    setFilteredProducts(filtered);
+  }, [searchTerm, filterCategory, sortBy, products]);
+
+  const addProduct = async (newProduct: Omit<Product, '_id' | 'categoryId'> & { categoryId: string }) => {
     try {
-      await deleteProduct(id).unwrap()
+      const result = await createProduct(newProduct);
+      if (result.error) {
+        console.error('Failed to create product:', result.error);
+        return;
+      }
+      // The product will be automatically added to the list via RTK Query cache invalidation
+      setStatus({ lastUpdated: new Date().toString() });
     } catch (error) {
-      console.error('Failed to delete product:', error)
+      console.error('Exception while creating product:', error);
     }
-  }
+  };
 
-  const setAvailability = async (id: string, availability: boolean) => {
-    try {
-      await updateProduct({ id, updates: { availability } }).unwrap()
-    } catch (error) {
-      console.error('Failed to update availability:', error)
-    }
-  }
+  const deleteProduct = (_id: string) => {
+    setProducts(products.filter((p) => p._id !== _id));
+    setStatus({ lastUpdated: new Date().toString() });
+  };
 
-  if (isLoading) {
-    return <div>Loading...</div>
-  }
+  const setAvailability = (_id: string, availability: boolean) => {
+    setProducts(products.map((p) => (p._id === _id ? { ...p, availability } : p)));
+    setStatus({ lastUpdated: new Date().toString() });
+  };
 
-  const totalProducts = products.length
-  const availableProducts = products.filter((p) => p.availability).length
-  const totalValue = products.reduce((sum, p) => sum + p.price, 0)
+  const totalProducts = products.length;
+  const availableProducts = products.filter((p) => p.availability).length;
+  const totalValue = products.reduce((sum, p) => sum + Number(p.price), 0);
 
   return (
     <div className="min-h-screen bg-gray-50/50">
       <div className="container mx-auto p-6 space-y-8">
-        {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-blue-600 rounded-lg">
@@ -91,7 +97,6 @@ const Inventory: React.FC = () => {
           </div>
         </div>
 
-        {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -127,7 +132,6 @@ const Inventory: React.FC = () => {
           </Card>
         </div>
 
-        {/* Main Content */}
         <Tabs defaultValue="products" className="space-y-6">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="products" className="flex items-center gap-2">
@@ -147,7 +151,40 @@ const Inventory: React.FC = () => {
                 <CardDescription>View and manage your product inventory</CardDescription>
               </CardHeader>
               <CardContent>
-                <ProductList products={products} onDelete={removeProduct} onSetAvailability={setAvailability} />
+                <div className="flex flex-col md:flex-row gap-4 mb-4">
+                  <Input
+                    placeholder="Search by name..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="flex-1"
+                  />
+                  <Select value={filterCategory} onValueChange={setFilterCategory}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="Filter by category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Categories</SelectItem>
+                      {categories?.map(cat => (
+                        <SelectItem key={cat._id} value={cat._id}>{cat.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={sortBy} onValueChange={setSortBy}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="Sort by" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="name">Name</SelectItem>
+                      <SelectItem value="price">Price</SelectItem>
+                      <SelectItem value="stock">Stock</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <ProductList
+                  products={filteredProducts}
+                  onDelete={deleteProduct}
+                  onSetAvailability={setAvailability}
+                />
               </CardContent>
             </Card>
           </TabsContent>
@@ -159,13 +196,14 @@ const Inventory: React.FC = () => {
                 <CardDescription>Add a new product to your inventory</CardDescription>
               </CardHeader>
               <CardContent>
-                <InventoryForm onAdd={addProduct} />
+                <InventoryForm
+                  onAdd={addProduct}
+                />
               </CardContent>
             </Card>
           </TabsContent>
         </Tabs>
 
-        {/* System Status */}
         <SystemStatus lastUpdated={status.lastUpdated} />
       </div>
     </div>

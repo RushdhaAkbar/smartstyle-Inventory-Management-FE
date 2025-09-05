@@ -18,14 +18,25 @@ export const api = createApi({
               { type: 'Product', id: 'LIST' },
             ]
           : [{ type: 'Product', id: 'LIST' }],
+      transformErrorResponse: (response) => {
+        console.error('Error fetching products:', response);
+        return response;
+      },
     }),
     createProduct: builder.mutation<any, Partial<any>>({
-      query: (body) => ({
-        url: 'products',
-        method: 'POST',
-        body,
-      }),
+      query: (body) => {
+        console.log('Sending create product request:', body); // Debug log
+        return {
+          url: 'products',
+          method: 'POST',
+          body,
+        };
+      },
       invalidatesTags: [{ type: 'Product', id: 'LIST' }],
+      transformErrorResponse: (response) => {
+        console.error('Error creating product:', response);
+        return response;
+      },
     }),
     deleteProduct: builder.mutation<void, string>({
       query: (id) => ({

@@ -1,58 +1,54 @@
-// File: src/components/InventoryForm.tsx
+// src/components/InventoryForm.tsx
 import type React from "react"
 import { useState, useRef } from "react"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Label } from "../components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select"
-import { Plus, Upload, QrCode, Barcode } from "lucide-react"
-import { useGetCategoriesQuery, useCreateCategoryMutation } from '../lib/api'
-
-interface Product {
-  id: string
-  name: string
-  sizes: string[]
-  colors: string[]
-  price: number
-  availability: boolean
-  categoryId: { _id: string; name: string }
-  qrCode: string
-  barcode: string
-  image: string
-  description: string
-  stock: number
-}
+import { Plus, Upload, QrCode, Barcode, Trash2 } from "lucide-react"
+import { useGetCategoriesQuery, useCreateCategoryMutation, useCreateProductMutation } from '../lib/api'
+import type { Product, Variant } from '../types/product'
 
 interface InventoryFormProps {
-  onAdd: (newProduct: Omit<Product, 'id' | 'categoryId'> & { categoryId: string }) => Promise<void>
+  onAdd: (newProduct: Omit<Product, '_id' | 'categoryId'> & { categoryId: string }) => Promise<void>
 }
 
 const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
   const { data: categories, refetch: refetchCategories } = useGetCategoriesQuery()
   const [createCategory] = useCreateCategoryMutation()
+  const [createProduct] = useCreateProductMutation()
   const [selectedCategory, setSelectedCategory] = useState<string>('')
+  const [selectedSubcategory, setSelectedSubcategory] = useState<string>('')
   const [newCategoryName, setNewCategoryName] = useState<string>('')
   const [showNewCategory, setShowNewCategory] = useState(false)
-  const [newProduct, setNewProduct] = useState<Omit<Product, 'id' | 'categoryId'>>({
+  const [newProduct, setNewProduct] = useState<Omit<Product, '_id' | 'categoryId'>>({
     name: "",
     sizes: [],
-    colors: [],
+    variants: [],
     price: 0,
     availability: true,
     qrCode: "",
     barcode: "",
-    image: "",
     description: "",
     stock: 0,
+    subcategory: "",
   })
+  const [currentVariant, setCurrentVariant] = useState<Variant>({ color: '', image: '' })
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const getSubcategories = () => {
+    if (selectedCategory && categories) {
+      const cat = categories.find(c => c._id === selectedCategory);
+      return cat ? cat.subcategories || [] : [];
+    }
+    return [];
+  }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
     setNewProduct((prev) => {
       const updated = { ...prev };
-      if (name === "color") {
-        updated.colors = value ? [value] : [];
-      } else if (name === "price") {
+      if (name === "price") {
         updated.price = parseFloat(value) || 0;
       } else if (name === "stock") {
         updated.stock = parseInt(value) || 0;
@@ -64,11 +60,9 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
     })
   }
 
-  const handleSelectChange = (name: keyof Omit<Product, 'id' | 'categoryId'>, value: string) => {
-    setNewProduct((prev) => ({ ...prev, [name]: name === "sizes" ? [value] : name === "colors" ? [value] : value }))
+  const handleSelectChange = (name: keyof Omit<Product, '_id' | 'categoryId'>, value: string) => {
+    setNewProduct((prev) => ({ ...prev, [name]: name === "sizes" ? [value] : value }))
   }
-
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const generateCodes = (productName: string) => {
     const timestamp = Date.now()
@@ -79,16 +73,33 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
     return { qrCode, barcode }
   }
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleVariantImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
       const reader = new FileReader()
       reader.onload = (event) => {
         const imageUrl = event.target?.result as string
-        setNewProduct((prev) => ({ ...prev, image: imageUrl }))
+        setCurrentVariant((prev) => ({ ...prev, image: imageUrl }))
       }
       reader.readAsDataURL(file)
     }
+  }
+
+  const addVariant = () => {
+    if (currentVariant.color && currentVariant.image) {
+      setNewProduct((prev) => ({
+        ...prev,
+        variants: [...prev.variants, currentVariant],
+      }))
+      setCurrentVariant({ color: '', image: '' })
+    }
+  }
+
+  const removeVariant = (index: number) => {
+    setNewProduct((prev) => ({
+      ...prev,
+      variants: prev.variants.filter((_, i) => i !== index),
+    }))
   }
 
   const handleAddCategory = async () => {
@@ -115,7 +126,14 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!newProduct.name || newProduct.price <= 0 || !selectedCategory) {
+    if (!newProduct.name || Number(newProduct.price) <= 0 || !selectedCategory || !selectedSubcategory || newProduct.variants.length === 0) {
+      console.error('Validation failed: Missing required fields', {
+        name: newProduct.name,
+        price: newProduct.price,
+        categoryId: selectedCategory,
+        subcategory: selectedSubcategory,
+        variants: newProduct.variants,
+      })
       return
     }
 
@@ -124,28 +142,34 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
     const productToAdd = {
       ...newProduct,
       categoryId: selectedCategory,
-      qrCode: newProduct.qrCode || qrCode,
-      barcode: newProduct.barcode || barcode,
-      image: newProduct.image || `/placeholder.svg?height=100&width=100&query=${encodeURIComponent(newProduct.name)}`,
+      subcategory: selectedSubcategory,
+      qrCode: qrCode,
+      barcode: barcode,
       sizes: newProduct.sizes,
-      colors: newProduct.colors,
     }
 
-    await onAdd(productToAdd)
-    setNewProduct({
-      name: "",
-      sizes: [],
-      colors: [],
-      price: 0,
-      availability: true,
-      qrCode: "",
-      barcode: "",
-      image: "",
-      description: "",
-      stock: 0,
-    })
-    setSelectedCategory('')
-    setNewCategoryName('')
+    console.log('Submitting product:', productToAdd)
+
+    try {
+      await onAdd(productToAdd)
+      setNewProduct({
+        name: "",
+        sizes: [],
+        variants: [],
+        price: 0,
+        availability: true,
+        qrCode: "",
+        barcode: "",
+        description: "",
+        stock: 0,
+        subcategory: "",
+      })
+      setSelectedCategory('')
+      setSelectedSubcategory('')
+      setNewCategoryName('')
+    } catch (error) {
+      console.error('Failed to create product:', error)
+    }
   }
 
   return (
@@ -167,12 +191,14 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
           <Label htmlFor="category">Category *</Label>
           <div className="flex gap-2">
             <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-              <SelectTrigger className="flex-1">
+              <SelectTrigger>
                 <SelectValue placeholder="Select category" />
               </SelectTrigger>
               <SelectContent>
-                {categories?.map(cat => (
-                  <SelectItem key={cat._id} value={cat._id}>{cat.name}</SelectItem>
+                {categories?.map((cat) => (
+                  <SelectItem key={cat._id} value={cat._id}>
+                    {cat.name}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -181,6 +207,22 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
             </Button>
           </div>
         </div>
+
+        {selectedCategory && (
+          <div className="space-y-2">
+            <Label htmlFor="subcategory">Subcategory</Label>
+            <Select value={selectedSubcategory} onValueChange={setSelectedSubcategory}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select subcategory" />
+              </SelectTrigger>
+              <SelectContent>
+                {getSubcategories().map((sub) => (
+                  <SelectItem key={sub.name} value={sub.name}>{sub.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
         {showNewCategory && (
           <div className="space-y-2">
@@ -215,9 +257,46 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
           </Select>
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="color">Color</Label>
-          <Input id="color" name="color" placeholder="Enter color" value={newProduct.colors[0] || ''} onChange={handleChange} />
+        <div className="space-y-2 md:col-span-2">
+          <Label>Variants (Color & Image) *</Label>
+          <div className="space-y-4">
+            <div className="flex gap-4">
+              <Input
+                placeholder="Enter color"
+                value={currentVariant.color}
+                onChange={(e) => setCurrentVariant((prev) => ({ ...prev, color: e.target.value }))}
+              />
+              <Input
+                type="file"
+                accept="image/*"
+                onChange={handleVariantImageUpload}
+                className="hidden"
+                ref={fileInputRef}
+              />
+              <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()}>
+                <Upload className="h-4 w-4 mr-2" />
+                Upload Image
+              </Button>
+              <Button type="button" onClick={addVariant}>
+                <Plus className="h-4 w-4 mr-2" />
+                Add Variant
+              </Button>
+            </div>
+            {currentVariant.image && (
+              <img src={currentVariant.image} alt="Preview" className="w-20 h-20 object-cover rounded border" />
+            )}
+            <div className="space-y-2">
+              {newProduct.variants.map((variant, index) => (
+                <div key={index} className="flex items-center gap-4 border p-2 rounded">
+                  <span>{variant.color}</span>
+                  <img src={variant.image} alt={variant.color} className="w-10 h-10 object-cover" />
+                  <Button type="button" variant="destructive" size="sm" onClick={() => removeVariant(index)}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
 
         <div className="space-y-2">
@@ -266,6 +345,7 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
             value={newProduct.qrCode}
             onChange={handleChange}
             className="bg-gray-50"
+            readOnly
           />
         </div>
 
@@ -281,41 +361,8 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
             value={newProduct.barcode}
             onChange={handleChange}
             className="bg-gray-50"
+            readOnly
           />
-        </div>
-
-        <div className="space-y-2 md:col-span-2">
-          <Label>Product Image</Label>
-          <div className="flex flex-col gap-3">
-            <div className="flex gap-2">
-              <Input
-                name="image"
-                placeholder="Enter image URL"
-                value={newProduct.image}
-                onChange={handleChange}
-                className="flex-1"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-2"
-              >
-                <Upload className="h-4 w-4" />
-                Upload
-              </Button>
-            </div>
-            <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
-            {newProduct.image && (
-              <div className="mt-2">
-                <img
-                  src={newProduct.image || "/placeholder.svg"}
-                  alt="Preview"
-                  className="w-20 h-20 object-cover rounded border"
-                />
-              </div>
-            )}
-          </div>
         </div>
       </div>
 

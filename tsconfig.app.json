@@ -15,7 +15,14 @@
     "noEmit": true,
 
     /* JSX */
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+
+    /* Path mapping */
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@lib/*": ["src/lib/*"]
+    }
   },
   "include": ["src"]
 }
