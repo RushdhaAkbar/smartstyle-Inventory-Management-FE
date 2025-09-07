@@ -5,12 +5,31 @@ import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import { Label } from "../components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select"
+import { Badge } from "../components/ui/badge"
 import { Plus, Upload, QrCode, Barcode, Trash2 } from "lucide-react"
 import { useGetCategoriesQuery, useCreateCategoryMutation, useCreateProductMutation } from '../lib/api'
-import type { Product, Variant } from '../types/product'
+
+interface Variant {
+  color: string
+  image: string
+}
+
+interface Product {
+  _id: string
+  name: string
+  sizes: string[]
+  variants: Variant[]
+  price: number
+  availability: boolean
+  categoryId: { _id: string; name: string }
+  qrCode: string
+  barcode: string
+  description: string
+  stock: number
+}
 
 interface InventoryFormProps {
-  onAdd: (newProduct: Omit<Product, '_id' | 'categoryId'> & { categoryId: string }) => Promise<void>
+  onAdd: (newProduct: Omit<Product, '_id' | 'categoryId'> & { categoryId: string; subcategory: string }) => Promise<void>
 }
 
 const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
@@ -31,9 +50,9 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
     barcode: "",
     description: "",
     stock: 0,
-    subcategory: "",
   })
   const [currentVariant, setCurrentVariant] = useState<Variant>({ color: '', image: '' })
+  const [currentSize, setCurrentSize] = useState<string>('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const getSubcategories = () => {
@@ -58,19 +77,6 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
       }
       return updated;
     })
-  }
-
-  const handleSelectChange = (name: keyof Omit<Product, '_id' | 'categoryId'>, value: string) => {
-    setNewProduct((prev) => ({ ...prev, [name]: name === "sizes" ? [value] : value }))
-  }
-
-  const generateCodes = (productName: string) => {
-    const timestamp = Date.now()
-    const qrCode = `QR-${productName.replace(/\s+/g, "").toUpperCase()}-${timestamp}`
-    const barcode = `${timestamp}${Math.floor(Math.random() * 1000)
-      .toString()
-      .padStart(3, "0")}`
-    return { qrCode, barcode }
   }
 
   const handleVariantImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -102,6 +108,23 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
     }))
   }
 
+  const addSize = () => {
+    if (currentSize && !newProduct.sizes.includes(currentSize)) {
+      setNewProduct((prev) => ({
+        ...prev,
+        sizes: [...prev.sizes, currentSize],
+      }))
+      setCurrentSize('')
+    }
+  }
+
+  const removeSize = (index: number) => {
+    setNewProduct((prev) => ({
+      ...prev,
+      sizes: prev.sizes.filter((_, i) => i !== index),
+    }))
+  }
+
   const handleAddCategory = async () => {
     if (!newCategoryName) return
     try {
@@ -126,7 +149,7 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!newProduct.name || Number(newProduct.price) <= 0 || !selectedCategory || !selectedSubcategory || newProduct.variants.length === 0) {
+    if (!newProduct.name || newProduct.price <= 0 || !selectedCategory || !selectedSubcategory || newProduct.variants.length === 0) {
       console.error('Validation failed: Missing required fields', {
         name: newProduct.name,
         price: newProduct.price,
@@ -137,20 +160,18 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
       return
     }
 
-    const { qrCode, barcode } = generateCodes(newProduct.name)
-
     const productToAdd = {
       ...newProduct,
       categoryId: selectedCategory,
       subcategory: selectedSubcategory,
-      qrCode: qrCode,
-      barcode: barcode,
       sizes: newProduct.sizes,
     }
 
-    console.log('Submitting product:', productToAdd)
+    console.log('Submitting product:', productToAdd) // Debug payload
 
     try {
+      const result = await createProduct(productToAdd).unwrap()
+      console.log('Product created successfully:', result)
       await onAdd(productToAdd)
       setNewProduct({
         name: "",
@@ -162,7 +183,6 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
         barcode: "",
         description: "",
         stock: 0,
-        subcategory: "",
       })
       setSelectedCategory('')
       setSelectedSubcategory('')
@@ -241,20 +261,42 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
         )}
 
         <div className="space-y-2">
-          <Label htmlFor="size">Size</Label>
-          <Select value={newProduct.sizes[0] || ''} onValueChange={(value) => handleSelectChange("sizes", value)}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select size" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="XS">XS</SelectItem>
-              <SelectItem value="S">S</SelectItem>
-              <SelectItem value="M">M</SelectItem>
-              <SelectItem value="L">L</SelectItem>
-              <SelectItem value="XL">XL</SelectItem>
-              <SelectItem value="XXL">XXL</SelectItem>
-            </SelectContent>
-          </Select>
+          <Label>Sizes</Label>
+          <div className="flex gap-2">
+            <Select value={currentSize} onValueChange={setCurrentSize}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select size" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="XS">XS</SelectItem>
+                <SelectItem value="S">S</SelectItem>
+                <SelectItem value="M">M</SelectItem>
+                <SelectItem value="L">L</SelectItem>
+                <SelectItem value="XL">XL</SelectItem>
+                <SelectItem value="XXL">XXL</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button type="button" onClick={addSize}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Size
+            </Button>
+          </div>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {newProduct.sizes.map((size, index) => (
+              <Badge key={index} variant="secondary" className="text-sm">
+                {size}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="ml-2 h-4 w-4 p-0"
+                  onClick={() => removeSize(index)}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </Badge>
+            ))}
+          </div>
         </div>
 
         <div className="space-y-2 md:col-span-2">
@@ -336,7 +378,7 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
         <div className="space-y-2">
           <Label htmlFor="qrCode" className="flex items-center gap-2">
             <QrCode className="h-4 w-4" />
-            QR Code (Auto-generated)
+            QR Code (Auto-generated by backend)
           </Label>
           <Input
             id="qrCode"
@@ -352,7 +394,7 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onAdd }) => {
         <div className="space-y-2">
           <Label htmlFor="barcode" className="flex items-center gap-2">
             <Barcode className="h-4 w-4" />
-            Barcode (Auto-generated)
+            Barcode (Auto-generated by backend)
           </Label>
           <Input
             id="barcode"

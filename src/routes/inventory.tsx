@@ -1,3 +1,4 @@
+// src/pages/inventory.tsx
 import type React from "react"
 import { useState, useEffect } from "react"
 import InventoryForm from "../components/InventoryForm"
@@ -6,29 +7,30 @@ import SystemStatus from "../components/SystemStatus"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { Package, Plus, BarChart3 } from "lucide-react"
-import { useGetProductsQuery, useGetCategoriesQuery, useCreateProductMutation } from '../lib/api'
+import { useGetProductsQuery, useGetCategoriesQuery } from '../lib/api'
 import { Input } from "../components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select"
 import type { Product } from '../types/product'
 
-interface Variant {
-  color: string
-  image: string
-}
-
 const Inventory: React.FC = () => {
-  const { data: productsData } = useGetProductsQuery()
-  const { data: categories } = useGetCategoriesQuery()
-  const [createProduct] = useCreateProductMutation()
+  const { data: productsData, error: productsError, isLoading: productsLoading } = useGetProductsQuery()
+  const { data: categories, error: categoriesError } = useGetCategoriesQuery()
   const [products, setProducts] = useState<Product[]>([])
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([])
   const [status, setStatus] = useState({ lastUpdated: new Date().toString() })
   const [searchTerm, setSearchTerm] = useState('')
   const [sortBy, setSortBy] = useState('name')
-  const [filterCategory, setFilterCategory] = useState('all') // Default to 'all'
+  const [filterCategory, setFilterCategory] = useState('all')
 
   useEffect(() => {
+    if (productsError) {
+      console.error('Error fetching products:', productsError);
+    }
+    if (categoriesError) {
+      console.error('Error fetching categories:', categoriesError);
+    }
     if (productsData) {
+      console.log('Fetched products:', productsData);
       const mappedProducts = productsData.map(p => ({
         ...p,
         categoryId: { _id: p.categoryId, name: categories?.find(c => c._id === p.categoryId)?.name || 'Unknown' },
@@ -38,15 +40,19 @@ const Inventory: React.FC = () => {
       setFilteredProducts(mappedProducts)
     }
     setStatus({ lastUpdated: new Date().toString() });
-  }, [productsData, categories]);
+  }, [productsData, categories, productsError, categoriesError]);
 
   useEffect(() => {
     let filtered = products
       .filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()))
-      .filter(p => filterCategory === 'all' || p.categoryId._id === filterCategory); // Handle 'all'
+      .filter(p => filterCategory === 'all' || p.categoryId._id === filterCategory);
 
     filtered = filtered.sort((a, b) => {
-      if (sortBy === 'price') return Number(a.price) - Number(b.price);
+      if (sortBy === 'price') {
+        const priceA = typeof a.price === 'string' ? parseFloat(a.price) : a.price;
+        const priceB = typeof b.price === 'string' ? parseFloat(b.price) : b.price;
+        return priceA - priceB;
+      }
       if (sortBy === 'stock') return a.stock - b.stock;
       return a.name.localeCompare(b.name);
     });
@@ -54,18 +60,15 @@ const Inventory: React.FC = () => {
     setFilteredProducts(filtered);
   }, [searchTerm, filterCategory, sortBy, products]);
 
-  const addProduct = async (newProduct: Omit<Product, '_id' | 'categoryId'> & { categoryId: string }) => {
-    try {
-      const result = await createProduct(newProduct);
-      if (result.error) {
-        console.error('Failed to create product:', result.error);
-        return;
-      }
-      // The product will be automatically added to the list via RTK Query cache invalidation
-      setStatus({ lastUpdated: new Date().toString() });
-    } catch (error) {
-      console.error('Exception while creating product:', error);
-    }
+  const addProduct = async (newProduct: Omit<Product, '_id' | 'categoryId'> & { categoryId: string; subcategory: string }) => {
+    const productWithId = {
+      ...newProduct,
+      _id: Date.now().toString(),
+      categoryId: { _id: newProduct.categoryId, name: categories?.find(c => c._id === newProduct.categoryId)?.name || 'Unknown' },
+      subcategory: newProduct.subcategory || '', // Ensure subcategory is included
+    };
+    setProducts([...products, productWithId]);
+    setStatus({ lastUpdated: new Date().toString() });
   };
 
   const deleteProduct = (_id: string) => {
@@ -80,7 +83,15 @@ const Inventory: React.FC = () => {
 
   const totalProducts = products.length;
   const availableProducts = products.filter((p) => p.availability).length;
-  const totalValue = products.reduce((sum, p) => sum + Number(p.price), 0);
+  const totalValue = products.reduce((sum, p) => sum + (typeof p.price === 'string' ? parseFloat(p.price) : p.price), 0);
+
+  if (productsLoading) {
+    return <div>Loading products...</div>;
+  }
+
+  if (productsError) {
+    return <div>Error loading products: {JSON.stringify(productsError)}</div>;
+  }
 
   return (
     <div className="min-h-screen bg-gray-50/50">
